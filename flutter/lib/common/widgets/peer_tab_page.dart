@@ -109,6 +109,17 @@ class _PeerTabPageState extends State<PeerTabPage>
                       offstage: !isDesktop,
                       child: _createPeerViewTypeSwitch(context)
                           .marginOnly(left: 13)),
+                  IconButton(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 2),
+                    onPressed: () {
+                      gFFI.abModel.pullAb();
+                    },
+                    icon: Icon(
+                      Icons.refresh_rounded,
+                    ),
+                    tooltip: translate("Refresh address book"),
+                  ),
                 ],
               )),
         ),
