@@ -196,7 +196,9 @@ class _PeerCardState extends State<_PeerCard>
                             getOnline(8, peer.online),
                             Expanded(
                                 child: Text(
-                              alias.isEmpty ? formatID(peer.id) : alias,
+                              peer.alias.isEmpty
+                                  ? formatID(peer.id)
+                                  : peer.alias,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleSmall,
                             )),
