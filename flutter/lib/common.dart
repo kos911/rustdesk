@@ -1605,6 +1605,10 @@ connect(BuildContext context, String id,
           isTcpTunneling: isTcpTunneling,
           isRDP: isRDP,
           forceRelay: forceRelay);
+      String name = gFFI.abModel.find(id)?.alias ?? '';
+      if (name.isNotEmpty) {
+        await bind.mainSetPeerAlias(id: id, alias: name);
+      }
     } else {
       await rustDeskWinManager.call(WindowType.Main, kWindowConnect, {
         'id': id,
