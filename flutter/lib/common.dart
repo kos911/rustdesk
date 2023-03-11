@@ -1210,11 +1210,11 @@ Future<bool> matchPeer(String searchText, Peer peer) async {
       peer.username.toLowerCase().contains(searchText)) {
     return true;
   }
-  final alias = await bind.mainGetPeerOption(id: peer.id, key: 'alias');
-  if (alias.isEmpty) {
+  //final alias = await bind.mainGetPeerOption(id: peer.id, key: 'alias');
+  if (peer.alias.isEmpty) {
     return false;
   }
-  return alias.toLowerCase().contains(searchText);
+  return peer.alias.toLowerCase().contains(searchText);
 }
 
 /// Get the image for the current [platform].

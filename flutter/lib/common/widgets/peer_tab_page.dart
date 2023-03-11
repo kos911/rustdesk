@@ -117,9 +117,47 @@ class _PeerTabPageState extends State<PeerTabPage>
                   offstage: _hideSort,
                   child: PeerSortDropdown().marginOnly(left: 8),
                 ),
+                IconButton(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 2),
+                  onPressed: () {
+                    gFFI.abModel.pullAb();
+                  },
+                  icon: Icon(
+                    Icons.refresh_rounded,
+                  ),
+                  tooltip: translate("Refresh address book"),
+                ),
               ],
             ),
           ),
+              padding: isDesktop ? null : EdgeInsets.symmetric(horizontal: 2),
+              constraints: isDesktop ? null : kMobilePageConstraints,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                      child: visibleContextMenuListener(
+                          _createSwitchBar(context))),
+                  buildScrollJumper(),
+                  const PeerSearchBar(),
+                  Offstage(
+                      offstage: !isDesktop,
+                      child: _createPeerViewTypeSwitch(context)
+                          .marginOnly(left: 13)),
+                  IconButton(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 2),
+                    onPressed: () {
+                      gFFI.abModel.pullAb();
+                    },
+                    icon: Icon(
+                      Icons.refresh_rounded,
+                    ),
+                    tooltip: translate("Refresh address book"),
+                  ),
+                ],
+              )),
         ),
         _createPeersView(),
       ],
