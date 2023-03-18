@@ -1159,7 +1159,6 @@ void _rdpDialog(String id) async {
                     ],
                     decoration: InputDecoration(
                         labelText: isDesktop ? null : translate('Port'),
-                        border: isDesktop ? const OutlineInputBorder() : null,
                         hintText: '3389'),
                     controller: portController,
                     autofocus: true,
@@ -1180,8 +1179,7 @@ void _rdpDialog(String id) async {
                 Expanded(
                   child: TextField(
                     decoration: InputDecoration(
-                        labelText: isDesktop ? null : translate('Username'),
-                        border: isDesktop ? const OutlineInputBorder() : null),
+                        labelText: isDesktop ? null : translate('Username')),
                     controller: userController,
                   ),
                 ),
@@ -1202,8 +1200,6 @@ void _rdpDialog(String id) async {
                         obscureText: secure.value,
                         decoration: InputDecoration(
                             labelText: isDesktop ? null : translate('Password'),
-                            border:
-                                isDesktop ? const OutlineInputBorder() : null,
                             suffixIcon: IconButton(
                                 onPressed: () => secure.value = !secure.value,
                                 icon: Icon(secure.value
