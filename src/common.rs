@@ -755,7 +755,7 @@ lazy_static::lazy_static! {
 
 #[cfg(target_os = "linux")]
 lazy_static::lazy_static! {
-    pub static ref IS_X11: bool = "x11" == hbb_common::platform::linux::get_display_server();
+    pub static ref IS_X11: bool = hbb_common::platform::linux::is_x11_or_headless();
 }
 
 pub fn make_fd_to_json(id: i32, path: String, entries: &Vec<FileEntry>) -> String {
@@ -817,4 +817,22 @@ pub async fn get_key(sync: bool) -> String {
         key = config::RS_PUB_KEY.to_owned();
     }
     key
+}
+
+pub fn is_peer_version_ge(v: &str) -> bool {
+    #[cfg(not(any(feature = "flutter", feature = "cli")))]
+    if let Some(session) = crate::ui::CUR_SESSION.lock().unwrap().as_ref() {
+        return session.get_peer_version() >= hbb_common::get_version_number(v);
+    }
+
+    #[cfg(feature = "flutter")]
+    if let Some(session) = crate::flutter::SESSIONS
+        .read()
+        .unwrap()
+        .get(&*crate::flutter::CUR_SESSION_ID.read().unwrap())
+    {
+        return session.get_peer_version() >= hbb_common::get_version_number(v);
+    }
+
+    false
 }
