@@ -558,18 +558,21 @@ jobs:
   #             target: x86_64-unknown-linux-gnu,
   #             os: ubuntu-20.04,
   #             extra-build-features: "",
+  #             enable-headless: true
   #           }
   #         - {
   #             arch: x86_64,
   #             target: x86_64-unknown-linux-gnu,
   #             os: ubuntu-20.04,
   #             extra-build-features: "flatpak",
+  #             enable-headless: false
   #           }
   #         - {
   #             arch: x86_64,
   #             target: x86_64-unknown-linux-gnu,
   #             os: ubuntu-20.04,
   #             extra-build-features: "appimage",
+  #             enable-headless: false
   #           }
   #         # - { target: x86_64-unknown-linux-musl   , os: ubuntu-20.04, use-cross: true }
   #   steps:
@@ -682,20 +685,24 @@ jobs:
   #             registry = 'https://github.com/rust-lang/crates.io-index'
   #             replace-with = 'local-registry'
 
-  #             [source.local-registry]
-  #             local-registry = '/opt/rust-registry/'
-  #           """ > ~/.cargo/config
-  #           cat ~/.cargo/config
-  #           # start build
-  #           pushd /workspace
-  #           # mock 
-  #           case "${{ matrix.job.arch }}" in
-  #             x86_64)
-  #               # no need mock on x86_64
-  #               export VCPKG_ROOT=/opt/artifacts/vcpkg
-  #               cargo build --lib --features hwcodec,flutter,flutter_texture_render,linux_headless,${{ matrix.job.extra-build-features }} --release
-  #               ;;
-  #           esac
+            #   [source.local-registry]
+            #   local-registry = '/opt/rust-registry/'
+            # """ > ~/.cargo/config
+            # cat ~/.cargo/config
+            # # start build
+            # pushd /workspace
+            # # mock 
+            # case "${{ matrix.job.arch }}" in
+            #   x86_64)
+            #     # no need mock on x86_64
+            #     export VCPKG_ROOT=/opt/artifacts/vcpkg
+            #     export DEFAULT_FEAT=""
+            #     if ${{ matrix.job.enable-headless }}; then
+            #       export DEFAULT_FEAT=linux_headless
+            #     fi
+            #     cargo build --lib --features hwcodec,flutter,flutter_texture_render,${{ matrix.job.extra-build-features }},$DEFAULT_FEAT --release
+            #     ;;
+            # esac
 
   #     - name: Upload Artifacts
   #       uses: actions/upload-artifact@master
@@ -718,6 +725,7 @@ jobs:
   #             os: ubuntu-20.04, # just for naming package, not running host
   #             use-cross: true,
   #             extra-build-features: "",
+  #             enable-headless: true
   #           }
   #         - {
   #             arch: aarch64,
@@ -725,6 +733,7 @@ jobs:
   #             os: ubuntu-20.04, # just for naming package, not running host
   #             use-cross: true,
   #             extra-build-features: "appimage",
+  #             enable-headless: false
   #           }
   #         # - { arch: aarch64, target: aarch64-unknown-linux-gnu   , os: ubuntu-20.04, use-cross: true, extra-build-features: "flatpak" }
   #         # - {
@@ -844,14 +853,18 @@ jobs:
   #             registry = 'https://github.com/rust-lang/crates.io-index'
   #             replace-with = 'local-registry'
 
-  #             [source.local-registry]
-  #             local-registry = '/opt/rust-registry/'
-  #           """ > ~/.cargo/config
-  #           cat ~/.cargo/config
-  #           # start build
-  #           pushd /workspace
-  #           export VCPKG_ROOT=/opt/artifacts/vcpkg
-  #           cargo build --lib --features flutter,${{ matrix.job.extra-build-features }} --release
+            #   [source.local-registry]
+            #   local-registry = '/opt/rust-registry/'
+            # """ > ~/.cargo/config
+            # cat ~/.cargo/config
+            # # start build
+            # pushd /workspace
+            # export VCPKG_ROOT=/opt/artifacts/vcpkg
+            # export DEFAULT_FEAT=""
+            # if ${{ matrix.job.enable-headless }}; then
+            #   export DEFAULT_FEAT=linux_headless
+            # fi
+            # cargo build --lib --features flutter,${{ matrix.job.extra-build-features }},$DEFAULT_FEAT --release
 
   #     - name: Upload Artifacts
   #       uses: actions/upload-artifact@master
@@ -875,6 +888,7 @@ jobs:
   #             os: ubuntu-latest,
   #             use-cross: true,
   #             extra-build-features: "",
+  #             enable-headless: true
   #           }
   #         # - { arch: armv7, target: armv7-unknown-linux-gnueabihf , os: ubuntu-20.04, use-cross: true, extra-build-features: "appimage" }
   #         # - { target: arm-unknown-linux-musleabihf, os: ubuntu-20.04, use-cross: true }
@@ -975,17 +989,21 @@ jobs:
   #           """ > ~/.cargo/config
   #           cat ~/.cargo/config
             
-  #           # build
-  #           pushd /workspace
-  #           python3 ./res/inline-sciter.py
-  #           export VCPKG_ROOT=/opt/artifacts/vcpkg
-  #           export ARCH=armhf
-  #           cargo build --features inline --release --bins
-  #           # package
-  #           mkdir -p ./Release
-  #           mv ./target/release/rustdesk ./Release/rustdesk
-  #           wget -O ./Release/libsciter-gtk.so https://github.com/c-smile/sciter-sdk/raw/master/bin.lnx/arm32/libsciter-gtk.so
-  #           ./build.py --package ./Release
+            # # build
+            # pushd /workspace
+            # python3 ./res/inline-sciter.py
+            # export VCPKG_ROOT=/opt/artifacts/vcpkg
+            # export ARCH=armhf
+            # export DEFAULT_FEAT=""
+            # if ${{ matrix.job.enable-headless }}; then
+            #   export DEFAULT_FEAT=linux_headless
+            # fi
+            # cargo build --features inline,${{ matrix.job.extra-build-features }},$DEFAULT_FEAT --release --bins
+            # # package
+            # mkdir -p ./Release
+            # mv ./target/release/rustdesk ./Release/rustdesk
+            # wget -O ./Release/libsciter-gtk.so https://github.com/c-smile/sciter-sdk/raw/master/bin.lnx/arm32/libsciter-gtk.so
+            # ./build.py --package ./Release
 
   #     - name: Rename rustdesk
   #       shell: bash
@@ -1409,40 +1427,43 @@ jobs:
   #       run: |
   #         sed -i "s/arch=('x86_64')/arch=('${{ matrix.job.arch }}')/g" res/PKGBUILD
 
-  #     - name: Build archlinux package
-  #       if: ${{ matrix.job.extra-build-features == '' }}
-  #       uses: vufa/arch-makepkg-action@master
-  #       with:
-  #         packages: >
-  #           llvm
-  #           clang
-  #           libva
-  #           libvdpau
-  #           rust
-  #           gstreamer
-  #           unzip
-  #           git
-  #           cmake
-  #           gcc
-  #           curl
-  #           wget
-  #           yasm
-  #           nasm
-  #           zip
-  #           make
-  #           pkg-config
-  #           clang
-  #           gtk3
-  #           xdotool
-  #           libxcb
-  #           libxfixes
-  #           alsa-lib
-  #           pipewire
-  #           python
-  #           ttf-arphic-uming
-  #           libappindicator-gtk3
-  #         scripts: |
-  #           cd res && HBB=`pwd`/.. FLUTTER=1 makepkg -f
+      # - name: Build archlinux package
+      #   if: ${{ matrix.job.extra-build-features == '' }}
+      #   uses: vufa/arch-makepkg-action@master
+      #   with:
+      #     packages: >
+      #       llvm
+      #       clang
+      #       libva
+      #       libvdpau
+      #       rust
+      #       gstreamer
+      #       unzip
+      #       git
+      #       cmake
+      #       gcc
+      #       curl
+      #       wget
+      #       yasm
+      #       nasm
+      #       zip
+      #       make
+      #       pkg-config
+      #       clang
+      #       gtk3
+      #       xdotool
+      #       libxcb
+      #       libxfixes
+      #       alsa-lib
+      #       pipewire
+      #       python
+      #       ttf-arphic-uming
+      #       libappindicator-gtk3
+      #       pam
+      #       gst-plugins-base
+      #       gst-plugin-pipewire
+      #     scripts: |
+      #       cd res && HBB=`pwd`/.. FLUTTER=1 makepkg -f
 
   #     - name: Publish archlinux package
   #       if: matrix.job.extra-build-features == '' && env.UPLOAD_ARTIFACT == 'true'
