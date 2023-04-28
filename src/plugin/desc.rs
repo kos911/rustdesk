@@ -8,7 +8,7 @@ use std::ffi::{c_char, CStr};
 pub struct UiButton {
     key: String,
     text: String,
-    icon: String,   // icon can be int in flutter, but string in other ui framework. And it is flexible to use string.
+    icon: String, // icon can be int in flutter, but string in other ui framework. And it is flexible to use string.
     tooltip: String,
     action: String, // The action to be triggered when the button is clicked.
 }
@@ -36,14 +36,13 @@ pub struct Location {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigItem {
     pub key: String,
-    pub value: String,
     pub default: String,
     pub description: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub local: Vec<ConfigItem>,
+    pub shared: Vec<ConfigItem>,
     pub peer: Vec<ConfigItem>,
 }
 
@@ -61,6 +60,7 @@ pub struct Desc {
     github: String,
     location: Location,
     config: Config,
+    listen_events: Vec<String>,
 }
 
 impl Desc {
@@ -115,5 +115,9 @@ impl Desc {
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn listen_events(&self) -> &Vec<String> {
+        &self.listen_events
     }
 }
