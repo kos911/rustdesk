@@ -1,23 +1,35 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
-use std::str::FromStr;
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, Mutex, RwLock,
+use std::{collections::HashMap, sync::atomic::AtomicBool};
+use std::{
+    ops::{Deref, DerefMut},
+    str::FromStr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    time::{Duration, SystemTime},
 };
-use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use rdev::{Event, EventType::*, KeyCode};
 use uuid::Uuid;
 
-use hbb_common::config::{Config, LocalConfig, PeerConfig};
-use hbb_common::rendezvous_proto::ConnType;
-use hbb_common::tokio::{self, sync::mpsc};
-use hbb_common::{allow_err, message_proto::*};
-use hbb_common::{fs, get_version_number, log, Stream};
+#[cfg(not(feature = "flutter"))]
+use hbb_common::fs;
+use hbb_common::{
+    allow_err,
+    config::{Config, LocalConfig, PeerConfig},
+    get_version_number, log,
+    message_proto::*,
+    rendezvous_proto::ConnType,
+    tokio::{
+        self,
+        sync::mpsc,
+        time::{Duration as TokioDuration, Instant},
+    },
+    SessionID, Stream,
+};
 
 use crate::client::io_loop::Remote;
 use crate::client::{
@@ -25,15 +37,20 @@ use crate::client::{
     input_os_password, load_config, send_mouse, start_video_audio_threads, FileManager, Key,
     LoginConfigHandler, QualityStatus, KEY_MAP,
 };
-use crate::common::{self, GrabState};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::common::GrabState;
 use crate::keyboard;
 use crate::{client::Data, client::Interface};
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub static IS_IN: AtomicBool = AtomicBool::new(false);
+
+const CHANGE_RESOLUTION_VALID_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Clone, Default)]
 pub struct Session<T: InvokeUiSession> {
-    pub id: String,
+    pub session_id: SessionID,
+    pub id: String, // peer id
     pub password: String,
     pub args: Vec<String>,
     pub lc: Arc<RwLock<LoginConfigHandler>>,
@@ -43,6 +60,7 @@ pub struct Session<T: InvokeUiSession> {
     pub server_keyboard_enabled: Arc<RwLock<bool>>,
     pub server_file_transfer_enabled: Arc<RwLock<bool>>,
     pub server_clipboard_enabled: Arc<RwLock<bool>>,
+    pub last_change_display: Arc<Mutex<ChangeDisplayRecord>>,
 }
 
 #[derive(Clone)]
@@ -53,6 +71,44 @@ pub struct SessionPermissionConfig {
     pub server_clipboard_enabled: Arc<RwLock<bool>>,
 }
 
+pub struct ChangeDisplayRecord {
+    time: Instant,
+    display: i32,
+    width: i32,
+    height: i32,
+}
+
+impl Default for ChangeDisplayRecord {
+    fn default() -> Self {
+        Self {
+            time: Instant::now()
+                - TokioDuration::from_secs(CHANGE_RESOLUTION_VALID_TIMEOUT_SECS + 1),
+            display: 0,
+            width: 0,
+            height: 0,
+        }
+    }
+}
+
+impl ChangeDisplayRecord {
+    fn new(display: i32, width: i32, height: i32) -> Self {
+        Self {
+            time: Instant::now(),
+            display,
+            width,
+            height,
+        }
+    }
+
+    pub fn is_the_same_record(&self, display: i32, width: i32, height: i32) -> bool {
+        self.time.elapsed().as_secs() < CHANGE_RESOLUTION_VALID_TIMEOUT_SECS
+            && self.display == display
+            && self.width == width
+            && self.height == height
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl SessionPermissionConfig {
     pub fn is_text_clipboard_required(&self) -> bool {
         *self.server_clipboard_enabled.read().unwrap()
@@ -62,6 +118,7 @@ impl SessionPermissionConfig {
 }
 
 impl<T: InvokeUiSession> Session<T> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn get_permission_config(&self) -> SessionPermissionConfig {
         SessionPermissionConfig {
             lc: self.lc.clone(),
@@ -80,13 +137,11 @@ impl<T: InvokeUiSession> Session<T> {
     }
 
     pub fn is_port_forward(&self) -> bool {
-        self.lc
-            .read()
-            .unwrap()
-            .conn_type
-            .eq(&ConnType::PORT_FORWARD)
+        let conn_type = self.lc.read().unwrap().conn_type;
+        conn_type == ConnType::PORT_FORWARD || conn_type == ConnType::RDP
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn is_rdp(&self) -> bool {
         self.lc.read().unwrap().conn_type.eq(&ConnType::RDP)
     }
@@ -143,6 +198,7 @@ impl<T: InvokeUiSession> Session<T> {
 
     pub fn toggle_option(&mut self, name: String) {
         let msg = self.lc.write().unwrap().toggle_option(name.clone());
+        #[cfg(not(feature = "flutter"))]
         if name == "enable-file-transfer" {
             self.send(Data::ToggleClipboardFile);
         }
@@ -155,10 +211,12 @@ impl<T: InvokeUiSession> Session<T> {
         self.lc.read().unwrap().get_toggle_option(&name)
     }
 
+    #[cfg(not(feature = "flutter"))]
     pub fn is_privacy_mode_supported(&self) -> bool {
         self.lc.read().unwrap().is_privacy_mode_supported()
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn is_text_clipboard_required(&self) -> bool {
         *self.server_clipboard_enabled.read().unwrap()
             && *self.server_keyboard_enabled.read().unwrap()
@@ -198,6 +256,7 @@ impl<T: InvokeUiSession> Session<T> {
         self.lc.read().unwrap().remember
     }
 
+    #[cfg(not(feature = "flutter"))]
     pub fn set_write_override(
         &mut self,
         job_id: i32,
@@ -216,16 +275,18 @@ impl<T: InvokeUiSession> Session<T> {
         true
     }
 
-    pub fn alternative_codecs(&self) -> (bool, bool, bool) {
+    pub fn alternative_codecs(&self) -> (bool, bool, bool, bool) {
         let decoder = scrap::codec::Decoder::supported_decodings(None);
         let mut vp8 = decoder.ability_vp8 > 0;
+        let mut av1 = decoder.ability_av1 > 0;
         let mut h264 = decoder.ability_h264 > 0;
         let mut h265 = decoder.ability_h265 > 0;
         let enc = &self.lc.read().unwrap().supported_encoding;
         vp8 = vp8 && enc.vp8;
+        av1 = av1 && enc.av1;
         h264 = h264 && enc.h264;
         h265 = h265 && enc.h265;
-        (vp8, h264, h265)
+        (vp8, av1, h264, h265)
     }
 
     pub fn change_prefer_codec(&self) {
@@ -238,6 +299,16 @@ impl<T: InvokeUiSession> Session<T> {
         lc.restarting_remote_device = true;
         let msg = lc.restart_remote_device();
         self.send(Data::Message(msg));
+    }
+
+    #[cfg(all(feature = "flutter", feature = "plugin_framework"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pub fn send_plugin_request(&self, request: PluginRequest) {
+        let mut misc = Misc::new();
+        misc.set_plugin_request(request);
+        let mut msg_out = Message::new();
+        msg_out.set_misc(misc);
+        self.send(Data::Message(msg_out));
     }
 
     pub fn get_audit_server(&self, typ: String) -> String {
@@ -262,13 +333,13 @@ impl<T: InvokeUiSession> Session<T> {
         });
     }
 
+    #[cfg(not(feature = "flutter"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn is_xfce(&self) -> bool {
-        crate::platform::is_xfce()
-    }
-
-    pub fn get_supported_keyboard_modes(&self) -> Vec<KeyboardMode> {
-        let version = self.get_peer_version();
-        common::get_supported_keyboard_modes(version)
+        #[cfg(not(any(target_os = "ios")))]
+        return crate::platform::is_xfce();
+        #[cfg(any(target_os = "ios"))]
+        false
     }
 
     pub fn remove_port_forward(&self, port: i32) {
@@ -299,6 +370,7 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::AddPortForward(pf));
     }
 
+    #[cfg(not(feature = "flutter"))]
     pub fn get_id(&self) -> String {
         self.id.clone()
     }
@@ -358,6 +430,7 @@ impl<T: InvokeUiSession> Session<T> {
         input_os_password(pass, activate, self.clone());
     }
 
+    #[cfg(not(feature = "flutter"))]
     pub fn get_chatbox(&self) -> String {
         #[cfg(feature = "inline")]
         return crate::ui::inline::get_chatbox();
@@ -462,9 +535,16 @@ impl<T: InvokeUiSession> Session<T> {
     }
 
     pub fn switch_display(&self, display: i32) {
+        let (w, h) = match self.lc.read().unwrap().get_custom_resolution(display) {
+            Some((w, h)) => (w, h),
+            None => (0, 0),
+        };
+
         let mut misc = Misc::new();
         misc.set_switch_display(SwitchDisplay {
             display,
+            width: w,
+            height: h,
             ..Default::default()
         });
         let mut msg_out = Message::new();
@@ -472,6 +552,7 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg_out));
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn enter(&self) {
         #[cfg(target_os = "windows")]
         {
@@ -486,6 +567,7 @@ impl<T: InvokeUiSession> Session<T> {
         keyboard::client::change_grab_status(GrabState::Run);
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub fn leave(&self) {
         #[cfg(target_os = "windows")]
         {
@@ -526,6 +608,18 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg_out));
     }
 
+    #[cfg(any(target_os = "ios"))]
+    pub fn handle_flutter_key_event(
+        &self,
+        _name: &str,
+        platform_code: i32,
+        position_code: i32,
+        lock_modes: i32,
+        down_or_up: bool,
+    ) {
+    }
+
+    #[cfg(not(any(target_os = "ios")))]
     pub fn handle_flutter_key_event(
         &self,
         _name: &str,
@@ -653,6 +747,7 @@ impl<T: InvokeUiSession> Session<T> {
         }));
     }
 
+    #[cfg(not(feature = "flutter"))]
     pub fn get_icon_path(&self, file_type: i32, ext: String) -> String {
         let mut path = Config::icon_path();
         if file_type == FileType::DirLink as i32 {
@@ -755,6 +850,10 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::ElevateWithLogon(username, password));
     }
 
+    #[cfg(any(target_os = "ios"))]
+    pub fn switch_sides(&self) {}
+
+    #[cfg(not(any(target_os = "ios")))]
     #[tokio::main(flavor = "current_thread")]
     pub async fn switch_sides(&self) {
         match crate::ipc::connect(1000, "").await {
@@ -789,7 +888,41 @@ impl<T: InvokeUiSession> Session<T> {
         }
     }
 
-    pub fn change_resolution(&self, width: i32, height: i32) {
+    pub fn handle_peer_switch_display(&self, display: &SwitchDisplay) {
+        self.ui_handler.switch_display(display);
+
+        if self.last_change_display.lock().unwrap().is_the_same_record(
+            display.display,
+            display.width,
+            display.height,
+        ) {
+            let custom_resolution = if display.width != display.original_resolution.width
+                || display.height != display.original_resolution.height
+            {
+                Some((display.width, display.height))
+            } else {
+                None
+            };
+            self.lc
+                .write()
+                .unwrap()
+                .set_custom_resolution(display.display, custom_resolution);
+        }
+    }
+
+    pub fn change_resolution(&self, display: i32, width: i32, height: i32) {
+        *self.last_change_display.lock().unwrap() =
+            ChangeDisplayRecord::new(display, width, height);
+        self.do_change_resolution(width, height);
+    }
+
+    fn try_change_init_resolution(&self, display: i32) {
+        if let Some((w, h)) = self.lc.read().unwrap().get_custom_resolution(display) {
+            self.do_change_resolution(w, h);
+        }
+    }
+
+    fn do_change_resolution(&self, width: i32, height: i32) {
         let mut misc = Misc::new();
         misc.set_change_resolution(Resolution {
             width,
@@ -856,6 +989,7 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn close_success(&self);
     fn update_quality_status(&self, qs: QualityStatus);
     fn set_connection_type(&self, is_secured: bool, direct: bool);
+    fn set_fingerprint(&self, fingerprint: String);
     fn job_error(&self, id: i32, err: String, file_num: i32);
     fn job_done(&self, id: i32, file_num: i32);
     fn clear_all_jobs(&self);
@@ -882,7 +1016,7 @@ pub trait InvokeUiSession: Send + Sync + Clone + 'static + Sized + Default {
     fn update_block_input_state(&self, on: bool);
     fn job_progress(&self, id: i32, file_num: i32, speed: f64, finished_size: f64);
     fn adapt_size(&self);
-    fn on_rgba(&self, data: &mut Vec<u8>);
+    fn on_rgba(&self, rgba: &mut scrap::ImageRgb);
     fn msgbox(&self, msgtype: &str, title: &str, text: &str, link: &str, retry: bool);
     #[cfg(any(target_os = "android", target_os = "ios"))]
     fn clipboard(&self, content: String);
@@ -958,6 +1092,7 @@ impl<T: InvokeUiSession> Interface for Session<T> {
                 self.msgbox("error", "Remote Error", "No Display", "");
                 return;
             }
+            self.try_change_init_resolution(pi.current_display);
             let p = self.lc.read().unwrap().should_auto_login();
             if !p.is_empty() {
                 input_os_password(p, true, self.clone());
@@ -1163,7 +1298,7 @@ pub async fn io_loop<T: InvokeUiSession>(handler: Session<T>) {
     let frame_count_cl = frame_count.clone();
     let ui_handler = handler.ui_handler.clone();
     let (video_sender, audio_sender, video_queue, decode_fps) =
-        start_video_audio_threads(move |data: &mut Vec<u8>| {
+        start_video_audio_threads(move |data: &mut scrap::ImageRgb| {
             frame_count_cl.fetch_add(1, Ordering::Relaxed);
             ui_handler.on_rgba(data);
         });

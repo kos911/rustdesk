@@ -6,6 +6,7 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
@@ -14,6 +15,7 @@ import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/scroll_wrapper.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/plugin/ui_manager.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
@@ -88,6 +90,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     }
                   },
                 ),
+                buildPluginEntry()
               ],
             ),
           ),
@@ -245,19 +248,19 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           ),
                         ),
                       ),
-                      InkWell(
-                        child: Obx(
-                          () => Icon(
-                            Icons.refresh,
-                            color: refreshHover.value
-                                ? textColor
-                                : Color(0xFFDDDDDD),
-                            size: 22,
-                          ).marginOnly(right: 8, top: 4),
-                        ),
-                        onTap: () => bind.mainUpdateTemporaryPassword(),
+                      AnimatedRotationWidget(
+                        onPressed: () => bind.mainUpdateTemporaryPassword(),
+                        child: Obx(() => RotatedBox(
+                            quarterTurns: 2,
+                            child: Icon(
+                              Icons.refresh,
+                              color: refreshHover.value
+                                  ? textColor
+                                  : Color(0xFFDDDDDD),
+                              size: 22,
+                            ))),
                         onHover: (value) => refreshHover.value = value,
-                      ),
+                      ).marginOnly(right: 8, top: 4),
                       InkWell(
                         child: Obx(
                           () => Icon(
@@ -572,6 +575,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     _updateTimer?.cancel();
     super.dispose();
   }
+
+  Widget buildPluginEntry() {
+    final entries = PluginUiManager.instance.entries.entries;
+    return Offstage(
+      offstage: entries.isEmpty,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...entries.map((entry) {
+            return entry.value;
+          })
+        ],
+      ),
+    );
+  }
 }
 
 void setPasswordDialog() async {
@@ -589,7 +607,7 @@ void setPasswordDialog() async {
     MinCharactersValidationRule(8),
   ];
 
-  gFFI.dialogManager.show((setState, close) {
+  gFFI.dialogManager.show((setState, close, context) {
     submit() {
       setState(() {
         errMsg0 = "";

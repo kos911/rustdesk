@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
+#[cfg(not(any(target_os = "ios")))]
+use crate::Connection;
 use hbb_common::{
     config::{Config, LocalConfig},
     tokio::{self, sync::broadcast, time::Instant},
@@ -7,11 +9,10 @@ use hbb_common::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::Connection;
-
 const TIME_HEARTBEAT: Duration = Duration::from_secs(30);
 const TIME_CONN: Duration = Duration::from_secs(3);
 
+#[cfg(not(any(target_os = "ios")))]
 lazy_static::lazy_static! {
     static ref SENDER : Mutex<broadcast::Sender<Vec<i32>>> = Mutex::new(start_hbbs_sync());
 }
@@ -21,10 +22,12 @@ pub fn start() {
     let _sender = SENDER.lock().unwrap();
 }
 
+#[cfg(not(target_os = "ios"))]
 pub fn signal_receiver() -> broadcast::Receiver<Vec<i32>> {
     SENDER.lock().unwrap().subscribe()
 }
 
+#[cfg(not(any(target_os = "ios")))]
 fn start_hbbs_sync() -> broadcast::Sender<Vec<i32>> {
     let (tx, _rx) = broadcast::channel::<Vec<i32>>(16);
     std::thread::spawn(move || start_hbbs_sync_async());
@@ -33,10 +36,13 @@ fn start_hbbs_sync() -> broadcast::Sender<Vec<i32>> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StrategyOptions {
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub config_options: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub extra: HashMap<String, String>,
 }
 
+#[cfg(not(any(target_os = "ios")))]
 #[tokio::main(flavor = "current_thread")]
 async fn start_hbbs_sync_async() {
     tokio::spawn(async move {

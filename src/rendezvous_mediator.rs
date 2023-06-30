@@ -13,7 +13,7 @@ use hbb_common::tcp::FramedStream;
 use hbb_common::{
     allow_err,
     anyhow::bail,
-    config::{Config, REG_INTERVAL, RENDEZVOUS_PORT, RENDEZVOUS_TIMEOUT},
+    config::{Config, CONNECT_TIMEOUT, READ_TIMEOUT, REG_INTERVAL, RENDEZVOUS_PORT},
     futures::future::join_all,
     log,
     protobuf::Message as _,
@@ -120,7 +120,7 @@ impl RendezvousMediator {
             })
             .unwrap_or(host.to_owned());
         let host = crate::check_port(&host, RENDEZVOUS_PORT);
-        let (mut socket, addr) = socket_client::new_udp_for(&host, RENDEZVOUS_TIMEOUT).await?;
+        let (mut socket, addr) = socket_client::new_udp_for(&host, CONNECT_TIMEOUT).await?;
         let mut rz = Self {
             addr: addr,
             host: host.clone(),
@@ -307,7 +307,7 @@ impl RendezvousMediator {
             secure,
         );
 
-        let mut socket = socket_client::connect_tcp(&*self.host, RENDEZVOUS_TIMEOUT).await?;
+        let mut socket = socket_client::connect_tcp(&*self.host, CONNECT_TIMEOUT).await?;
 
         let mut msg_out = Message::new();
         let mut rr = RelayResponse {
@@ -352,7 +352,7 @@ impl RendezvousMediator {
         }
         let peer_addr = AddrMangle::decode(&fla.socket_addr);
         log::debug!("Handle intranet from {:?}", peer_addr);
-        let mut socket = socket_client::connect_tcp(&*self.host, RENDEZVOUS_TIMEOUT).await?;
+        let mut socket = socket_client::connect_tcp(&*self.host, CONNECT_TIMEOUT).await?;
         let local_addr = socket.local_addr();
         let local_addr: SocketAddr =
             format!("{}:{}", local_addr.ip(), local_addr.port()).parse()?;
@@ -391,7 +391,7 @@ impl RendezvousMediator {
         let peer_addr = AddrMangle::decode(&ph.socket_addr);
         log::debug!("Punch hole to {:?}", peer_addr);
         let mut socket = {
-            let socket = socket_client::connect_tcp(&*self.host, RENDEZVOUS_TIMEOUT).await?;
+            let socket = socket_client::connect_tcp(&*self.host, CONNECT_TIMEOUT).await?;
             let local_addr = socket.local_addr();
             // key important here for punch hole to tell my gateway incoming peer is safe.
             // it can not be async here, because local_addr can not be reused, we must close the connection before use it again.
@@ -563,56 +563,6 @@ async fn direct_server(server: ServerPtr) {
     }
 }
 
-#[inline]
-pub fn get_broadcast_port() -> u16 {
-    (RENDEZVOUS_PORT + 3) as _
-}
-
-pub fn get_mac() -> String {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    if let Ok(Some(mac)) = mac_address::get_mac_address() {
-        mac.to_string()
-    } else {
-        "".to_owned()
-    }
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    "".to_owned()
-}
-
-#[allow(dead_code)]
-fn lan_discovery() -> ResultType<()> {
-    let addr = SocketAddr::from(([0, 0, 0, 0], get_broadcast_port()));
-    let socket = std::net::UdpSocket::bind(addr)?;
-    socket.set_read_timeout(Some(std::time::Duration::from_millis(1000)))?;
-    log::info!("lan discovery listener started");
-    loop {
-        let mut buf = [0; 2048];
-        if let Ok((len, addr)) = socket.recv_from(&mut buf) {
-            if let Ok(msg_in) = Message::parse_from_bytes(&buf[0..len]) {
-                match msg_in.union {
-                    Some(rendezvous_message::Union::PeerDiscovery(p)) => {
-                        if p.cmd == "ping" {
-                            let mut msg_out = Message::new();
-                            let peer = PeerDiscovery {
-                                cmd: "pong".to_owned(),
-                                mac: get_mac(),
-                                id: Config::get_id(),
-                                hostname: whoami::hostname(),
-                                username: crate::platform::get_active_username(),
-                                platform: whoami::platform().to_string(),
-                                ..Default::default()
-                            };
-                            msg_out.set_peer_discovery(peer);
-                            socket.send_to(&msg_out.write_to_bytes()?, addr).ok();
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
 #[tokio::main(flavor = "current_thread")]
 pub async fn query_online_states<F: FnOnce(Vec<String>, Vec<String>)>(ids: Vec<String>, f: F) {
     let test = false;
@@ -649,7 +599,8 @@ pub async fn query_online_states<F: FnOnce(Vec<String>, Vec<String>)>(ids: Vec<S
 }
 
 async fn create_online_stream() -> ResultType<FramedStream> {
-    let (rendezvous_server, _servers, _contained) = crate::get_rendezvous_server(1_000).await;
+    let (rendezvous_server, _servers, _contained) =
+        crate::get_rendezvous_server(READ_TIMEOUT).await;
     let tmp: Vec<&str> = rendezvous_server.split(":").collect();
     if tmp.len() != 2 {
         bail!("Invalid server address: {}", rendezvous_server);
@@ -659,7 +610,7 @@ async fn create_online_stream() -> ResultType<FramedStream> {
         bail!("Invalid server address: {}", rendezvous_server);
     }
     let online_server = format!("{}:{}", tmp[0], port - 1);
-    socket_client::connect_tcp(online_server, RENDEZVOUS_TIMEOUT).await
+    socket_client::connect_tcp(online_server, CONNECT_TIMEOUT).await
 }
 
 async fn query_online_states_(
@@ -683,38 +634,30 @@ async fn query_online_states_(
 
         let mut socket = create_online_stream().await?;
         socket.send(&msg_out).await?;
-        match socket.next_timeout(RENDEZVOUS_TIMEOUT).await {
-            Some(Ok(bytes)) => {
-                if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
-                    match msg_in.union {
-                        Some(rendezvous_message::Union::OnlineResponse(online_response)) => {
-                            let states = online_response.states;
-                            let mut onlines = Vec::new();
-                            let mut offlines = Vec::new();
-                            for i in 0..ids.len() {
-                                // bytes index from left to right
-                                let bit_value = 0x01 << (7 - i % 8);
-                                if (states[i / 8] & bit_value) == bit_value {
-                                    onlines.push(ids[i].clone());
-                                } else {
-                                    offlines.push(ids[i].clone());
-                                }
-                            }
-                            return Ok((onlines, offlines));
-                        }
-                        _ => {
-                            // ignore
+        if let Some(msg_in) = crate::common::get_next_nonkeyexchange_msg(&mut socket, None).await {
+            match msg_in.union {
+                Some(rendezvous_message::Union::OnlineResponse(online_response)) => {
+                    let states = online_response.states;
+                    let mut onlines = Vec::new();
+                    let mut offlines = Vec::new();
+                    for i in 0..ids.len() {
+                        // bytes index from left to right
+                        let bit_value = 0x01 << (7 - i % 8);
+                        if (states[i / 8] & bit_value) == bit_value {
+                            onlines.push(ids[i].clone());
+                        } else {
+                            offlines.push(ids[i].clone());
                         }
                     }
+                    return Ok((onlines, offlines));
+                }
+                _ => {
+                    // ignore
                 }
             }
-            Some(Err(e)) => {
-                log::error!("Failed to receive {e}");
-            }
-            None => {
-                // TODO: Make sure socket closed?
-                bail!("Online stream receives None");
-            }
+        } else {
+            // TODO: Make sure socket closed?
+            bail!("Online stream receives None");
         }
 
         if query_begin.elapsed() > timeout {

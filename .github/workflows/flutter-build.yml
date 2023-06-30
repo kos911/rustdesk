@@ -8,14 +8,19 @@ on:
         default: true
 
 env:
+  CARGO_NDK_VERSION: "3.1.2"
   LLVM_VERSION: "15.0.6"
-  FLUTTER_VERSION: "3.7.0"
+  FLUTTER_VERSION: "3.10.5"
+  FLUTTER_RUST_BRIDGE_VERSION: "1.75.3"
+  # for arm64 linux
+  FLUTTER_ELINUX_VERSION: "3.10.5"
+  FLUTTER_ELINUX_COMMIT_ID: "410b3ca42f2cd0c485edf517a1666652bab442d4"
   TAG_NAME: "test"
-  # vcpkg version: 2022.05.10
+  # vcpkg version: 2023.04.15
   # for multiarch gcc compatibility
-  VCPKG_COMMIT_ID: "14e7bb4ae24616ec54ff6b2f6ef4e8659434ea44"
+  VCPKG_COMMIT_ID: "501db0f17ef6df184fcdbfbe0f87cde2313b6ab1"
   VERSION: "1.2.0"
-  NDK_VERSION: "r23"
+  NDK_VERSION: "r25c"
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: '${{ secrets.ANDROID_SIGNING_KEY }}'
   MACOS_P12_BASE64: '${{ secrets.MACOS_P12_BASE64 }}'
@@ -52,13 +57,13 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
-      - name: Replace engine with rustdesk custom flutter engine
-        run: |
-          flutter doctor -v
-          flutter precache --windows
-          Invoke-WebRequest -Uri https://github.com/Kingtous/engine/releases/download/v3.7.0-rustdesk/windows-x64-release-flutter.zip -OutFile windows-x64-flutter-release.zip
-          Expand-Archive windows-x64-flutter-release.zip -DestinationPath engine
-          mv -Force engine/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+      # - name: Replace engine with rustdesk custom flutter engine
+      #   run: |
+      #     flutter doctor -v
+      #     flutter precache --windows
+      #     Invoke-WebRequest -Uri https://github.com/Kingtous/engine/releases/download/v3.7.0-rustdesk/windows-x64-release-flutter.zip -OutFile windows-x64-flutter-release.zip
+      #     Expand-Archive windows-x64-flutter-release.zip -DestinationPath engine
+      #     mv -Force engine/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -74,7 +79,7 @@ jobs:
 
       - name: Install flutter rust bridge deps
         run: |
-          cargo install flutter_rust_bridge_codegen
+          cargo install flutter_rust_bridge_codegen --version ${{ env.FLUTTER_RUST_BRIDGE_VERSION }} --features "uuid"
           Push-Location flutter ; flutter pub get ; Pop-Location
           ~/.cargo/bin/flutter_rust_bridge_codegen --rust-input ./src/flutter_ffi.rs --dart-output ./flutter/lib/generated_bridge.dart
 
@@ -152,7 +157,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install LLVM and Clang
-        uses: Kingtous/install-llvm-action-32bit@master
+        uses: rustdesk-org/install-llvm-action-32bit@master
         with:
           version: ${{ env.LLVM_VERSION }}
 
@@ -188,8 +193,6 @@ jobs:
           python3 res/inline-sciter.py
           # Patch sciter x86
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
-          # Replace the link for the ico.
-          rm res/icon.ico && cp flutter/windows/runner/resources/app_icon.ico res/icon.ico
           cargo build --features inline --release --bins
           mkdir -p ./Release
           mv ./target/release/rustdesk.exe ./Release/rustdesk.exe
@@ -378,6 +381,87 @@ jobs:
   generate-bridge-linux:
     uses: ./.github/workflows/bridge.yml
 
+  build-rustdesk-ios:
+    needs: [generate-bridge-linux]
+    name: build rustdesk ios ipa ${{ matrix.job.target }} (${{ matrix.job.os }}) [${{ matrix.job.extra-build-features }}]
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - {
+              arch: aarch64,
+              target: aarch64-apple-ios,
+              os: macos-latest,
+              extra-build-features: "",
+            }
+    steps:
+      - name: Install dependencies
+        run: |
+          brew install nasm yasm
+      - name: Checkout source code
+        uses: actions/checkout@v3
+      - name: Install flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Clone deps
+        shell: bash
+        run: |
+          pushd /opt
+          sudo git clone https://github.com/rustdesk-org/rustdesk_thirdparty_lib.git --depth=1
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@master
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.job.target }}
+          override: true
+          profile: minimal # minimal component installation (ie, no documentation)
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: rustdesk-lib-cache
+          key: ${{ matrix.job.target }}-${{ matrix.job.extra-build-features }}
+
+      - name: Build rustdesk lib
+        env:
+          VCPKG_ROOT: /opt/rustdesk_thirdparty_lib/vcpkg
+        run: |
+          rustup target add ${{ matrix.job.target }} 
+          cargo build --features flutter --release --target aarch64-apple-ios --lib
+
+      - name: Build rustdesk
+        shell: bash
+        run: |
+          pushd flutter
+          flutter build ipa --release --obfuscate --split-debug-info=./split-debug-info --no-codesign
+      
+      # - name: Upload Artifacts
+      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
+      #   uses: actions/upload-artifact@master
+      #   with:
+      #     name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
+      #     path: flutter/build/ios/ipa/*.ipa
+
+      # - name: Publish ipa package
+      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
+      #   uses: softprops/action-gh-release@v1
+      #   with:
+      #     prerelease: true
+      #     tag_name: ${{ env.TAG_NAME }}
+      #     files: |
+      #       flutter/build/ios/ipa/*.ipa
+    
+
   build-rustdesk-android:
     needs: [generate-bridge-linux]
     name: build rustdesk android apk ${{ matrix.job.target }} (${{ matrix.job.os }}) [${{ matrix.job.extra-build-features }}]
@@ -422,7 +506,7 @@ jobs:
         shell: bash
         run: |
           pushd /opt
-          git clone https://github.com/Kingtous/rustdesk_thirdparty_lib.git --depth=1
+          git clone https://github.com/rustdesk-org/rustdesk_thirdparty_lib.git --depth=1
 
       - name: Restore bridge files
         uses: actions/download-artifact@master
@@ -442,10 +526,6 @@ jobs:
           prefix-key: rustdesk-lib-cache
           key: ${{ matrix.job.target }}-${{ matrix.job.extra-build-features }}
 
-      - name: Disable rust bridge build
-        run: |
-          sed -i "s/gen_flutter_rust_bridge();/\/\//g" build.rs
-
       - name: Build rustdesk lib
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
@@ -453,7 +533,7 @@ jobs:
           VCPKG_ROOT: /opt/rustdesk_thirdparty_lib/vcpkg
         run: |
           rustup target add ${{ matrix.job.target }} 
-          cargo install cargo-ndk
+          cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }}
           case ${{ matrix.job.target }} in
             aarch64-linux-android)
               ./flutter/ndk_arm64.sh
@@ -1532,7 +1612,7 @@ jobs:
   #       run: |
   #         mv rustdesk-${{ env.VERSION }}-${{ matrix.job.target }}-${{ matrix.job.os }}.deb rustdesk-${{ env.VERSION }}.deb
 
-  #     - uses: Kingtous/run-on-arch-action@amd64-support
+  #     - uses: rustdesk-org/run-on-arch-action@amd64-support
   #       name: Build rustdesk flatpak package for ${{ matrix.job.arch }}
   #       id: rpm
   #       with:
