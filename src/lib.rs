@@ -40,19 +40,17 @@ use common::*;
 pub mod cli;
 #[cfg(not(any(target_os = "android", target_os = "ios", feature = "cli")))]
 pub mod core_main;
-#[cfg(all(windows, feature = "hbbs"))]
-mod hbbs;
 mod lang;
 #[cfg(windows)]
 mod license;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod port_forward;
 
+#[cfg(all(feature = "flutter", feature = "plugin_framework"))]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub mod api;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub mod plugins;
+pub mod plugin;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
 
 mod ui_cm_interface;
@@ -64,7 +62,8 @@ mod hbbs_http;
 #[cfg(windows)]
 pub mod clipboard_file;
 
-#[cfg(all(windows, feature = "with_rc"))]
-pub mod rc;
-#[cfg(target_os = "windows")]
-pub mod win_privacy;
+#[cfg(windows)]
+pub mod privacy_win_mag;
+
+#[cfg(all(windows, feature = "virtual_display_driver"))]
+pub mod virtual_display_manager;

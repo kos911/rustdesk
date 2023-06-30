@@ -8,7 +8,6 @@ import 'package:get/get.dart';
 
 import '../../common.dart';
 import '../../common/formatter/id_formatter.dart';
-import '../../models/model.dart';
 import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
@@ -316,7 +315,7 @@ class _PeerCardState extends State<_PeerCard>
         _menuPos = RelativeRect.fromLTRB(x, y, x, y);
       },
       onPointerUp: (_) => _showPeerMenu(peer.id),
-      child: ActionMore());
+      child: build_more(context));
 
   /// Show the peer menu and handle user's choice.
   /// User might remove the peer or send a file to the peer.
@@ -666,7 +665,7 @@ abstract class BasePeerCard extends StatelessWidget {
     RxBool isInProgress = false.obs;
     String name = await _getAlias(id);
     var controller = TextEditingController(text: name);
-    gFFI.dialogManager.show((setState, close) {
+    gFFI.dialogManager.show((setState, close, context) {
       submit() async {
         isInProgress.value = true;
         String name = controller.text.trim();
@@ -726,10 +725,10 @@ abstract class BasePeerCard extends StatelessWidget {
 
   void _delete(String id, bool isLan, Function reloadFunc) async {
     gFFI.dialogManager.show(
-      (setState, close) {
+      (setState, close, context) {
         submit() async {
           if (isLan) {
-            bind.mainRemoveDiscovered(id: id);
+            await bind.mainRemoveDiscovered(id: id);
           } else {
             final favs = (await bind.mainGetFav()).toList();
             if (favs.remove(id)) {
@@ -737,7 +736,6 @@ abstract class BasePeerCard extends StatelessWidget {
             }
             await bind.mainRemovePeer(id: id);
           }
-          removePreference(id);
           await reloadFunc();
           close();
         }
@@ -1025,7 +1023,7 @@ class AddressBookPeerCard extends BasePeerCard {
     final tags = List.of(gFFI.abModel.tags);
     var selectedTag = gFFI.abModel.getPeerTags(id).obs;
 
-    gFFI.dialogManager.show((setState, close) {
+    gFFI.dialogManager.show((setState, close, context) {
       submit() async {
         setState(() {
           isInProgress = true;
@@ -1117,7 +1115,7 @@ void _rdpDialog(String id) async {
       text: await bind.mainGetPeerOption(id: id, key: 'rdp_password'));
   RxBool secure = true.obs;
 
-  gFFI.dialogManager.show((setState, close) {
+  gFFI.dialogManager.show((setState, close, context) {
     submit() async {
       String port = portController.text.trim();
       String username = userController.text;
@@ -1138,9 +1136,6 @@ void _rdpDialog(String id) async {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(
-              height: 8.0,
-            ),
             Row(
               children: [
                 isDesktop
@@ -1209,7 +1204,7 @@ void _rdpDialog(String id) async {
                       )),
                 ),
               ],
-            ).marginOnly(bottom: isDesktop ? 8 : 0),
+            )
           ],
         ),
       ),
@@ -1233,27 +1228,28 @@ Widget getOnline(double rightPadding, bool online) {
               radius: 3, backgroundColor: online ? Colors.green : kColorWarn)));
 }
 
-class ActionMore extends StatelessWidget {
-  final RxBool _hover = false.obs;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-        onTap: () {},
-        onHover: (value) => _hover.value = value,
-        child: Obx(() => CircleAvatar(
-            radius: 14,
-            backgroundColor: _hover.value
-                ? Theme.of(context).scaffoldBackgroundColor
-                : Theme.of(context).colorScheme.background,
-            child: Icon(Icons.more_vert,
-                size: 18,
-                color: _hover.value
-                    ? Theme.of(context).textTheme.titleLarge?.color
-                    : Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.color
-                        ?.withOpacity(0.5)))));
-  }
+Widget build_more(BuildContext context, {bool invert = false}) {
+  final RxBool hover = false.obs;
+  return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () {},
+      onHover: (value) => hover.value = value,
+      child: Obx(() => CircleAvatar(
+          radius: 14,
+          backgroundColor: hover.value
+              ? (invert
+                  ? Theme.of(context).colorScheme.background
+                  : Theme.of(context).scaffoldBackgroundColor)
+              : (invert
+                  ? Theme.of(context).scaffoldBackgroundColor
+                  : Theme.of(context).colorScheme.background),
+          child: Icon(Icons.more_vert,
+              size: 18,
+              color: hover.value
+                  ? Theme.of(context).textTheme.titleLarge?.color
+                  : Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.color
+                      ?.withOpacity(0.5)))));
 }

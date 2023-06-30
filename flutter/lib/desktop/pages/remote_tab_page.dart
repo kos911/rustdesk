@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -44,18 +45,24 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
   static const IconData selectedIcon = Icons.desktop_windows_sharp;
   static const IconData unselectedIcon = Icons.desktop_windows_outlined;
 
-  late MenubarState _menubarState;
+  late ToolbarState _toolbarState;
 
   var connectionMap = RxList<Widget>.empty(growable: true);
 
   _ConnectionTabPageState(Map<String, dynamic> params) {
-    _menubarState = MenubarState();
+    _toolbarState = ToolbarState();
     RemoteCountState.init();
     final peerId = params['id'];
     if (peerId != null) {
       ConnectionTypeState.init(peerId);
-      tabController.onSelected = (_, id) {
-        bind.setCurSessionId(id: id);
+      tabController.onSelected = (id) {
+        final remotePage = tabController.state.value.tabs
+            .firstWhereOrNull((tab) => tab.key == id)
+            ?.page;
+        if (remotePage is RemotePage) {
+          final ffi = remotePage.ffi;
+          bind.setCurSessionId(sessionId: ffi.sessionId);
+        }
         WindowController.fromWindowId(windowId())
             .setTitle(getWindowNameWithId(id));
       };
@@ -69,7 +76,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
           key: ValueKey(peerId),
           id: peerId,
           password: params['password'],
-          menubarState: _menubarState,
+          toolbarState: _toolbarState,
+          tabController: tabController,
           switchUuid: params['switch_uuid'],
           forceRelay: params['forceRelay'],
         ),
@@ -95,6 +103,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         final switchUuid = args['switch_uuid'];
         window_on_top(windowId());
         ConnectionTypeState.init(id);
+        _toolbarState.setShow(
+            bind.mainGetUserDefaultOption(key: 'collapse_toolbar') != 'Y');
         tabController.add(TabInfo(
           key: id,
           label: id,
@@ -105,7 +115,8 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
             key: ValueKey(id),
             id: id,
             password: args['password'],
-            menubarState: _menubarState,
+            toolbarState: _toolbarState,
+            tabController: tabController,
             switchUuid: switchUuid,
             forceRelay: args['forceRelay'],
           ),
@@ -127,7 +138,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
   @override
   void dispose() {
     super.dispose();
-    _menubarState.save();
+    _toolbarState.save();
   }
 
   @override
@@ -158,20 +169,36 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
                   ],
                 );
               } else {
-                final msgDirect = translate(
-                    connectionType.direct.value == ConnectionType.strDirect
-                        ? 'Direct Connection'
-                        : 'Relay Connection');
-                final msgSecure = translate(
-                    connectionType.secure.value == ConnectionType.strSecure
-                        ? 'Secure Connection'
-                        : 'Insecure Connection');
+                bool secure =
+                    connectionType.secure.value == ConnectionType.strSecure;
+                bool direct =
+                    connectionType.direct.value == ConnectionType.strDirect;
+                var msgConn;
+                if (secure && direct) {
+                  msgConn = translate("Direct and encrypted connection");
+                } else if (secure && !direct) {
+                  msgConn = translate("Relayed and encrypted connection");
+                } else if (!secure && direct) {
+                  msgConn = translate("Direct and unencrypted connection");
+                } else {
+                  msgConn = translate("Relayed and unencrypted connection");
+                }
+                var msgFingerprint = '${translate('Fingerprint')}:\n';
+                var fingerprint = FingerprintState.find(key).value;
+                if (fingerprint.length > 5 * 8) {
+                  var first = fingerprint.substring(0, 39);
+                  var second = fingerprint.substring(40);
+                  msgFingerprint += '$first\n$second';
+                } else {
+                  msgFingerprint += fingerprint;
+                }
+
                 final tab = Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     icon,
                     Tooltip(
-                      message: '$msgDirect\n$msgSecure',
+                      message: '$msgConn\n$msgFingerprint',
                       child: SvgPicture.asset(
                         'assets/${connectionType.secure.value}${connectionType.direct.value}.svg',
                         width: themeConf.iconSize,
@@ -216,7 +243,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
             ));
   }
 
-  // Note: Some dup code to ../widgets/remote_menubar
+  // Note: Some dup code to ../widgets/remote_toolbar
   Widget _tabMenuBuilder(String key, CancelFunc cancelFunc) {
     final List<MenuEntryBase<String>> menu = [];
     const EdgeInsets padding = EdgeInsets.only(left: 8.0, right: 5.0);
@@ -226,6 +253,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
     final ffi = remotePage.ffi;
     final pi = ffi.ffiModel.pi;
     final perms = ffi.ffiModel.permissions;
+    final sessionId = ffi.sessionId;
     menu.addAll([
       MenuEntryButton<String>(
         childBuilder: (TextStyle? style) => Text(
@@ -241,11 +269,11 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       MenuEntryButton<String>(
         childBuilder: (TextStyle? style) => Obx(() => Text(
               translate(
-                  _menubarState.show.isTrue ? 'Hide Menubar' : 'Show Menubar'),
+                  _toolbarState.show.isTrue ? 'Hide Toolbar' : 'Show Toolbar'),
               style: style,
             )),
         proc: () {
-          _menubarState.switchShow();
+          _toolbarState.switchShow();
           cancelFunc();
         },
         padding: padding,
@@ -265,6 +293,7 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
       menu.add(MenuEntryDivider<String>());
       menu.add(RemoteMenuEntry.showRemoteCursor(
         key,
+        sessionId,
         padding,
         dismissFunc: cancelFunc,
       ));
@@ -272,18 +301,29 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
 
     if (perms['keyboard'] != false && !ffi.ffiModel.viewOnly) {
       if (perms['clipboard'] != false) {
-        menu.add(RemoteMenuEntry.disableClipboard(key, padding,
+        menu.add(RemoteMenuEntry.disableClipboard(sessionId, padding,
             dismissFunc: cancelFunc));
       }
 
-      menu.add(
-          RemoteMenuEntry.insertLock(key, padding, dismissFunc: cancelFunc));
+      menu.add(RemoteMenuEntry.insertLock(sessionId, padding,
+          dismissFunc: cancelFunc));
 
       if (pi.platform == kPeerPlatformLinux || pi.sasEnabled) {
-        menu.add(RemoteMenuEntry.insertCtrlAltDel(key, padding,
+        menu.add(RemoteMenuEntry.insertCtrlAltDel(sessionId, padding,
             dismissFunc: cancelFunc));
       }
     }
+
+    menu.add(MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate('Copy Fingerprint'),
+        style: style,
+      ),
+      proc: () => onCopyFingerprint(FingerprintState.find(key).value),
+      padding: padding,
+      dismissOnClicked: true,
+      dismissCallback: cancelFunc,
+    ));
 
     return mod_menu.PopupMenu<String>(
       items: menu

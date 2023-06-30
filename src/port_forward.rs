@@ -92,6 +92,7 @@ pub async fn listen(
                         break;
                     }
                     Some(Data::NewRDP) => {
+                        println!("receive run_rdp from ui_receiver");
                         run_rdp(addr.port());
                     }
                     _ => {}
@@ -154,7 +155,8 @@ async fn connect_and_login_2(
     } else {
         ConnType::PORT_FORWARD
     };
-    let (mut stream, direct) = Client::start(id, key, token, conn_type, interface.clone()).await?;
+    let (mut stream, direct, _pk) =
+        Client::start(id, key, token, conn_type, interface.clone()).await?;
     let mut interface = interface;
     let mut buffer = Vec::new();
     let mut received = false;

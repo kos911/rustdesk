@@ -72,10 +72,6 @@ pub fn start(args: &mut [String]) {
     allow_err!(sciter::set_options(sciter::RuntimeOptions::GfxLayer(
         sciter::GFX_LAYER::WARP
     )));
-    #[cfg(all(windows, not(feature = "inline")))]
-    unsafe {
-        winapi::um::shellscalingapi::SetProcessDpiAwareness(2);
-    }
     use sciter::SCRIPT_RUNTIME_FEATURES::*;
     allow_err!(sciter::set_options(sciter::RuntimeOptions::ScriptFeatures(
         ALLOW_FILE_IO as u8 | ALLOW_SOCKET_IO as u8 | ALLOW_EVAL as u8 | ALLOW_SYSINFO as u8
@@ -366,9 +362,9 @@ impl UI {
     fn get_connect_status(&mut self) -> Value {
         let mut v = Value::array(0);
         let x = get_connect_status();
-        v.push(x.0);
-        v.push(x.1);
-        v.push(x.3);
+        v.push(x.status_num);
+        v.push(x.key_confirmed);
+        v.push(x.id);
         v
     }
 
@@ -470,6 +466,10 @@ impl UI {
         get_version()
     }
 
+    fn get_fingerprint(&self) -> String {
+        get_fingerprint()
+    }
+
     fn get_app_name(&self) -> String {
         get_app_name()
     }
@@ -542,6 +542,7 @@ impl UI {
     }
 
     fn change_id(&self, id: String) {
+        reset_async_job_status();
         let old_id = self.get_id();
         change_id_shared(id, old_id);
     }
@@ -584,6 +585,10 @@ impl UI {
 
     fn handle_relay_id(&self, id: String) -> String {
         handle_relay_id(id)
+    }
+
+    fn get_hostname(&self) -> String {
+        get_hostname()
     }
 }
 
@@ -649,6 +654,7 @@ impl sciter::EventHandler for UI {
         fn get_software_update_url();
         fn get_new_version();
         fn get_version();
+        fn get_fingerprint();
         fn update_me(String);
         fn show_run_without_install();
         fn run_without_install();
@@ -668,6 +674,7 @@ impl sciter::EventHandler for UI {
         fn get_langs();
         fn default_video_save_directory();
         fn handle_relay_id(String);
+        fn get_hostname();
     }
 }
 
